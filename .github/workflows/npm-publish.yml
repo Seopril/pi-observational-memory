@@ -234,7 +234,7 @@ jobs:
           publish_status=$?
           set -e
 
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5 6; do
             set +e
             published_integrity="$(registry_integrity)"
             published_status=$?
@@ -257,7 +257,7 @@ jobs:
                 exit 0
               fi
             fi
-            if [ "$attempt" -lt 3 ]; then sleep $((attempt * 5)); fi
+            if [ "$attempt" -lt 6 ]; then sleep 60; fi
           done
 
           if [ "$publish_status" -ne 0 ]; then
