@@ -24,7 +24,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24.16.0
-          registry-url: https://registry.npmjs.org/
       - name: Verify release identity
         env:
           EXPECTED_REPOSITORY: elpapi42/pi-observational-memory
@@ -83,7 +82,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24.16.0
-          registry-url: https://registry.npmjs.org/
       - name: Verify release identity
         env:
           EXPECTED_REPOSITORY: elpapi42/pi-observational-memory
