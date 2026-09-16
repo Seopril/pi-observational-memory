@@ -11,13 +11,12 @@ export type WorkerStreamSimple = (
  * Duck-typed subset of Pi's extension ModelRegistry.
  *
  * `streamSimple` is the host-composed path (Pi #8964). Until that lands on the
- * facade, `getRegisteredProviderConfig` still exposes each `registerProvider`
- * `streamSimple` handler, keyed by the extension provider id — match on
- * `config.api === model.api`.
+ * facade, `getRegisteredProviderConfig` exposes each `registerProvider`
+ * `streamSimple` handler by provider id. Use only the model's exact provider
+ * and require matching API metadata as a consistency check.
  */
 export type StreamableModelRegistry = {
 	streamSimple?: WorkerStreamSimple;
-	getRegisteredProviderIds?: () => readonly string[];
 	getRegisteredProviderConfig?: (providerId: string) => {
 		api?: string;
 		streamSimple?: WorkerStreamSimple;
@@ -45,17 +44,10 @@ export function resolveWorkerStreamSimple(
 	}
 
 	try {
-		if (
-			typeof modelRegistry?.getRegisteredProviderIds === "function"
-			&& typeof modelRegistry?.getRegisteredProviderConfig === "function"
-		) {
-			for (const providerId of modelRegistry.getRegisteredProviderIds()) {
-				const config = modelRegistry.getRegisteredProviderConfig(providerId);
-				const composed = config?.streamSimple;
-				if (config?.api === model.api && typeof composed === "function") {
-					return composed;
-				}
-			}
+		const config = modelRegistry?.getRegisteredProviderConfig?.(model.provider);
+		const composed = config?.streamSimple;
+		if (config?.api === model.api && typeof composed === "function") {
+			return composed;
 		}
 	} catch {
 		// Incomplete host/test doubles still use the built-in compat dispatcher.
