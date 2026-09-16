@@ -16,44 +16,74 @@ describe("resolveWorkerStreamSimple", () => {
 		}, override)).toBe(override);
 	});
 
-	it("uses ModelRegistry.streamSimple when the host exposes the composed facade", () => {
-		expect(resolveWorkerStreamSimple(customApiModel, {
+	it("uses ModelRegistry.streamSimple without querying provider registration", () => {
+		const registry = {
 			streamSimple: customStream,
-		})).not.toBe(compatStreamSimple);
-		const resolved = resolveWorkerStreamSimple(customApiModel, { streamSimple: customStream });
+			getRegisteredProviderConfig: () => {
+				throw new Error("registry must not be queried");
+			},
+		};
+		expect(resolveWorkerStreamSimple(customApiModel, registry)).not.toBe(compatStreamSimple);
+		const resolved = resolveWorkerStreamSimple(customApiModel, registry);
 		const model = {} as any;
 		const context = {} as any;
 		resolved(model, context);
 		expect(customStream).toHaveBeenCalledWith(model, context, undefined);
 	});
 
-	it("matches getRegisteredProviderConfig().streamSimple by model.api", () => {
+	it("uses the exact provider's composed stream despite a foreign same-API registration", () => {
 		const cursorStream = vi.fn() as unknown as WorkerStreamSimple;
-		const otherStream = vi.fn() as unknown as WorkerStreamSimple;
-		const resolved = resolveWorkerStreamSimple(customApiModel, {
-			getRegisteredProviderIds: () => ["openai", "cursor"],
-			getRegisteredProviderConfig: (id) => {
-				if (id === "openai") return { api: "openai-completions", streamSimple: otherStream };
-				if (id === "cursor") return { api: "cursor-sdk", streamSimple: cursorStream };
-				return undefined;
-			},
+		const foreignStream = vi.fn() as unknown as WorkerStreamSimple;
+		const getRegisteredProviderConfig = vi.fn((id: string) => {
+			if (id === "cursor") return { api: "cursor-sdk", streamSimple: cursorStream };
+			if (id === "other") return { api: "cursor-sdk", streamSimple: foreignStream };
+			return undefined;
 		});
-		expect(resolved).toBe(cursorStream);
+
+		expect(resolveWorkerStreamSimple(customApiModel, {
+			getRegisteredProviderIds: () => ["other", "cursor"],
+			getRegisteredProviderConfig,
+		})).toBe(cursorStream);
+		expect(getRegisteredProviderConfig).toHaveBeenCalledWith("cursor");
+	});
+
+	it("falls back to compat when only a foreign provider has the same API", () => {
+		const foreignStream = vi.fn() as unknown as WorkerStreamSimple;
+		const minimaxModel = { api: "anthropic-messages", provider: "minimax", id: "MiniMax-M3" } as any;
+		const getRegisteredProviderConfig = vi.fn((id: string) => {
+			if (id === "anthropic") return { api: "anthropic-messages", streamSimple: foreignStream };
+			return undefined;
+		});
+
+		expect(resolveWorkerStreamSimple(minimaxModel, {
+			getRegisteredProviderIds: () => ["anthropic"],
+			getRegisteredProviderConfig,
+		})).toBe(compatStreamSimple);
+		expect(getRegisteredProviderConfig).toHaveBeenCalledWith("minimax");
+	});
+
+	it("falls back to compat when the exact provider has a different API", () => {
+		const minimaxStream = vi.fn() as unknown as WorkerStreamSimple;
+		const minimaxModel = { api: "anthropic-messages", provider: "minimax", id: "MiniMax-M3" } as any;
+
+		expect(resolveWorkerStreamSimple(minimaxModel, {
+			getRegisteredProviderConfig: (id) => id === "minimax"
+				? { api: "openai-completions", streamSimple: minimaxStream }
+				: undefined,
+		})).toBe(compatStreamSimple);
 	});
 
 	it("falls back to pi-ai compat for built-in APIs with no composed handler", () => {
-		expect(resolveWorkerStreamSimple({ api: "openai-completions" } as any, {
-			getRegisteredProviderIds: () => [],
+		expect(resolveWorkerStreamSimple({ api: "openai-completions", provider: "openai", id: "gpt" } as any, {
 			getRegisteredProviderConfig: () => undefined,
 		})).toBe(compatStreamSimple);
 	});
 
 	it("falls back to compat when registry lookup throws", () => {
 		expect(resolveWorkerStreamSimple(customApiModel, {
-			getRegisteredProviderIds: () => {
+			getRegisteredProviderConfig: () => {
 				throw new Error("no runtime");
 			},
-			getRegisteredProviderConfig: () => undefined,
 		})).toBe(compatStreamSimple);
 	});
 });
@@ -79,11 +109,10 @@ describe("runObserver composed stream dispatch", () => {
 			allowedSourceEntryIds: ["entry-a"],
 			agentLoop: loop,
 			modelRegistry: {
-				getRegisteredProviderIds: () => ["cliproxyapi"],
-				getRegisteredProviderConfig: () => ({
+				getRegisteredProviderConfig: (id) => id === "cliproxyapi" ? {
 					api: "cliproxyapi-codex-responses",
 					streamSimple: composed,
-				}),
+				} : undefined,
 			},
 		});
 
