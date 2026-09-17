@@ -48,6 +48,7 @@ describe("V3 config", () => {
 			showWorkerNotifications: true,
 			passive: false,
 			debugLog: false,
+			logUsage: true,
 		});
 		expect(loadConfig(cwd, {})).toEqual(DEFAULTS);
 	});

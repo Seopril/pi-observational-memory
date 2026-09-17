@@ -57,6 +57,7 @@ export interface Config {
 	showWorkerNotifications: boolean;
 	passive: boolean;
 	debugLog: boolean;
+	logUsage: boolean;
 }
 
 export const DEFAULTS: Config = {
@@ -72,6 +73,7 @@ export const DEFAULTS: Config = {
 	showWorkerNotifications: true,
 	passive: false,
 	debugLog: false,
+	logUsage: true,
 };
 
 export const COMPACT_AFTER_TOKENS_MODE_VALUES: readonly CompactAfterTokensMode[] = ["calibrated", "ratio"] as const;
@@ -212,6 +214,7 @@ function normalizeSettingsConfig(value: Record<string, unknown>): Partial<Config
 	if (typeof value.showWorkerNotifications === "boolean") normalized.showWorkerNotifications = value.showWorkerNotifications;
 	if (typeof value.passive === "boolean") normalized.passive = value.passive;
 	if (typeof value.debugLog === "boolean") normalized.debugLog = value.debugLog;
+	if (typeof value.logUsage === "boolean") normalized.logUsage = value.logUsage;
 	const model = normalizeModel(value.model);
 	if (model) normalized.model = model;
 	return normalized;

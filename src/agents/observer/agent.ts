@@ -1,5 +1,5 @@
 import { agentLoop, type AgentContext, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
-import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Message, Model, ModelThinkingLevel, Usage } from "@earendil-works/pi-ai";
 import { Type } from "@earendil-works/pi-ai";
 import type { Static } from "typebox";
 import { hashId } from "../../ids.js";
@@ -103,7 +103,7 @@ export function normalizeSourceEntryIds(
 	return Array.from(seen).sort((a, b) => (allowedOrder.get(a) ?? 0) - (allowedOrder.get(b) ?? 0));
 }
 
-export async function runObserver(args: RunObserverArgs): Promise<Observation[] | undefined> {
+export async function runObserver(args: RunObserverArgs): Promise<{ observations: Observation[]; usage: Usage | undefined } | undefined> {
 	const { model, apiKey, headers, env, priorReflections, priorObservations, chunk, allowedSourceEntryIds, signal } = args;
 	const conversation = chunk.trim();
 	if (!conversation) return undefined;
@@ -222,14 +222,19 @@ ${conversation}`;
 		resolveWorkerStreamSimple(model, args.modelRegistry, args.streamSimple),
 	);
 	let streamError: { stopReason: string; errorMessage?: string } | undefined;
+	let usage: Usage | undefined;
 	for await (const event of stream) {
 		// Drain events; the tool's execute already collects records.
 		logAgentStreamError("observer", event);
+		// Capture usage from assistant message_end events.
+		const msg = (event as { message?: { role?: string; stopReason?: string; errorMessage?: string; usage?: Usage } }).message;
+		if (msg?.role === "assistant" && msg.stopReason === "stop") {
+			usage = msg.usage;
+		}
 		// Watch for a terminal API/stream failure so it is not conflated with
 		// a deliberate empty result.
-		const message = (event as { message?: { role?: string; stopReason?: string; errorMessage?: string } }).message;
-		if (message?.role === "assistant" && (message.stopReason === "error" || message.stopReason === "aborted")) {
-			streamError = { stopReason: message.stopReason, errorMessage: message.errorMessage };
+		if (msg?.role === "assistant" && (msg.stopReason === "error" || msg.stopReason === "aborted")) {
+			streamError = { stopReason: msg.stopReason, errorMessage: msg.errorMessage };
 		}
 	}
 	await stream.result();
@@ -238,5 +243,5 @@ ${conversation}`;
 		if (streamError) throw new ObserverStreamError(streamError.stopReason, streamError.errorMessage);
 		return undefined;
 	}
-	return Array.from(accumulated.values());
+	return { observations: Array.from(accumulated.values()), usage };
 }

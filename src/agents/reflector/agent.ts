@@ -1,5 +1,5 @@
 import { agentLoop, type AgentContext, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
-import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Message, Model, ModelThinkingLevel, Usage } from "@earendil-works/pi-ai";
 import { Type } from "@earendil-works/pi-ai";
 import type { Static } from "typebox";
 import { debugLog } from "../../debug-log.js";
@@ -109,7 +109,7 @@ function normalizeReflectionContent(content: string): string | undefined {
 	return normalized;
 }
 
-export async function runReflector(args: RunReflectorArgs): Promise<Reflection[] | undefined> {
+export async function runReflector(args: RunReflectorArgs): Promise<{ reflections: Reflection[]; usage: Usage | undefined } | undefined> {
 	const { model, apiKey, headers, env, reflections, observations, signal } = args;
 	if (observations.length === 0) return undefined;
 
@@ -197,9 +197,14 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
 		signal,
 		resolveWorkerStreamSimple(model, args.modelRegistry, args.streamSimple),
 	);
+	let usage: Usage | undefined;
 	for await (const event of stream) {
 		// Tool execution collects records.
 		logAgentStreamError("reflector", event);
+		const msg = (event as { message?: { role?: string; stopReason?: string; usage?: Usage } }).message;
+		if (msg?.role === "assistant" && msg.stopReason === "stop") {
+			usage = msg.usage;
+		}
 	}
 	await stream.result();
 	const acceptedReflections = Array.from(accumulated.values());
@@ -214,5 +219,5 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
 		acceptedSupportIdCounts: summarizeSupportIdCounts(acceptedReflections),
 		coverageTransitionsByRelevance: summarizeCoverageTransitionsByRelevance(observations, coverageById, afterCoverageById),
 	});
-	return acceptedReflections.length > 0 ? acceptedReflections : undefined;
+	return acceptedReflections.length > 0 ? { reflections: acceptedReflections, usage } : undefined;
 }
