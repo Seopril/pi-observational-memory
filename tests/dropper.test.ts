@@ -10,9 +10,11 @@ import {
 import { AGENT_LOOP_MAX_TOKENS } from "../src/model-budget.js";
 import { observation, reflection } from "./fixtures/session.js";
 
-function fakeAgentLoop(handler: (prompts: any[], context: any, config: any) => Promise<void> | void): any {
+function fakeAgentLoop(handler: (prompts: any[], context: any, config: any) => Promise<void> | void, events: any[] = []): any {
 	return ((prompts: any[], context: any, config: any) => ({
-		async *[Symbol.asyncIterator]() {},
+		async *[Symbol.asyncIterator]() {
+			for (const event of events) yield event;
+		},
 		result: async () => {
 			await handler(prompts, context, config);
 			return {};
@@ -228,7 +230,7 @@ describe("V3 dropper agent", () => {
 		});
 
 		// Rendered-line pool is 56 tokens; a 40-token target caps the run at 1 drop.
-		await expect(runDropper({ ...baseArgs, targetTokens: 40, agentLoop: loop })).resolves.toEqual(["aaaaaaaaaaaa"]);
+		await expect(runDropper({ ...baseArgs, targetTokens: 40, agentLoop: loop })).resolves.toEqual({ ids: ["aaaaaaaaaaaa"], usage: undefined });
 	});
 
 	it("returns critical proposed ids when they are the selected valid candidates", async () => {
@@ -236,7 +238,7 @@ describe("V3 dropper agent", () => {
 			await context.tools[0].execute("tool-1", { ids: ["missing", "cccccccccccc"] });
 		});
 
-		await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toEqual(["cccccccccccc"]);
+		await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toEqual({ ids: ["cccccccccccc"], usage: undefined });
 	});
 
 	it("returns undefined when only invalid ids are proposed", async () => {
@@ -254,12 +256,37 @@ describe("V3 dropper agent", () => {
 		});
 
 		// Rendered-line pool is 56 tokens; a 40-token target caps the run at 1 drop.
-		await expect(runDropper({ ...baseArgs, targetTokens: 40, agentLoop: loop })).resolves.toEqual(["aaaaaaaaaaaa"]);
+		await expect(runDropper({ ...baseArgs, targetTokens: 40, agentLoop: loop })).resolves.toEqual({ ids: ["aaaaaaaaaaaa"], usage: undefined });
 	});
 
 	it("returns undefined when no tool call drops observations", async () => {
 		const loop = fakeAgentLoop(() => {});
 		await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toBeUndefined();
+	});
+
+	it("returns usage from the stream result when available", async () => {
+		const usage = { input: 1200, output: 300, cacheRead: 800, cacheWrite: 100, totalTokens: 2400, cost: { total: 0.012 } };
+		const loop = fakeAgentLoop(async (_prompts, context) => {
+			await context.tools[0].execute("tool-1", { ids: ["aaaaaaaaaaaa", "bbbbbbbbbbbb"] });
+		}, [{ type: "message_end", message: { role: "assistant", stopReason: "stop", usage } }]);
+
+		const result = await runDropper({ ...baseArgs, agentLoop: loop });
+
+		expect(result).toHaveProperty("ids");
+		expect(result).toHaveProperty("usage");
+		expect(result.usage).toEqual(usage);
+		expect(result.ids).toHaveLength(2);
+	});
+
+	it("returns undefined usage when the stream has no assistant message with usage", async () => {
+		const loop = fakeAgentLoop(async (_prompts, context) => {
+			await context.tools[0].execute("tool-1", { ids: ["aaaaaaaaaaaa"] });
+		});
+
+		const result = await runDropper({ ...baseArgs, agentLoop: loop });
+
+		expect(result).toHaveProperty("usage");
+		expect(result.usage).toBeUndefined();
 	});
 
 	it("skips the model at or below the target", async () => {

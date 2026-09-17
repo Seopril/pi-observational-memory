@@ -119,10 +119,11 @@ describe("runObserver", () => {
 			});
 		});
 
-		const observations = await runObserver({ ...baseArgs, agentLoop: loop });
+		const result = await runObserver({ ...baseArgs, agentLoop: loop });
 
-		expect(observations).toHaveLength(1);
-		expect(observations?.[0]).toMatchObject({
+		expect(result).toHaveProperty("observations");
+		expect(result.observations).toHaveLength(1);
+		expect(result.observations?.[0]).toMatchObject({
 			content,
 			timestamp: "2026-05-02 10:30",
 			relevance: "high",
@@ -130,7 +131,7 @@ describe("runObserver", () => {
 			// tokenCount is code-computed from the full rendered line (id + timestamp + relevance + content).
 			tokenCount: 18,
 		});
-		expect(observations?.[0].id).toMatch(/^[a-f0-9]{12}$/);
+		expect(result.observations?.[0].id).toMatch(/^[a-f0-9]{12}$/);
 	});
 
 	it("rejects invented source ids and returns no observations", async () => {
@@ -153,10 +154,11 @@ describe("runObserver", () => {
 			});
 		});
 
-		const observations = await runObserver({ ...baseArgs, agentLoop: loop });
+		const result = await runObserver({ ...baseArgs, agentLoop: loop });
 
-		expect(observations).toHaveLength(1);
-		expect(observations?.[0].content).toBe("Same content");
+		expect(result).toHaveProperty("observations");
+		expect(result.observations).toHaveLength(1);
+		expect(result.observations?.[0].content).toBe("Same content");
 	});
 
 	it("returns undefined when no tool call records observations", async () => {
@@ -181,10 +183,11 @@ describe("runObserver", () => {
 			});
 		}, [assistantEndEvent("error", "gateway timeout")]);
 
-		const observations = await runObserver({ ...baseArgs, agentLoop: loop });
+		const result = await runObserver({ ...baseArgs, agentLoop: loop });
 
-		expect(observations).toHaveLength(1);
-		expect(observations?.[0].content).toBe("Kept despite later error");
+		expect(result).toHaveProperty("observations");
+		expect(result.observations).toHaveLength(1);
+		expect(result.observations?.[0].content).toBe("Kept despite later error");
 	});
 
 	it("uses maxTurns as an observer turn cap", async () => {
@@ -220,6 +223,41 @@ describe("runObserver", () => {
 		await runObserver({ ...baseArgs, model: { reasoning: true } as any, agentLoop: loop, thinkingLevel: "off" });
 
 		expect(seenReasoning).toBeUndefined();
+	});
+
+	it("returns usage from the stream result when available", async () => {
+		const usage = { input: 1200, output: 300, cacheRead: 800, cacheWrite: 100, totalTokens: 2400, cost: { total: 0.012 } };
+		const loop = fakeAgentLoop(async (_prompts, context) => {
+			await context.tools[0].execute("tool-1", {
+				observations: [{ timestamp: "2026-05-02 10:30", content: "Test observation", relevance: "medium", sourceEntryIds: ["entry-a"] }],
+			});
+		}, [{ type: "message_end", message: { role: "assistant", stopReason: "stop", usage } }]);
+
+		const result = await runObserver({ ...baseArgs, agentLoop: loop });
+
+		expect(result).toHaveProperty("observations");
+		expect(result).toHaveProperty("usage");
+		expect(result.usage).toEqual(usage);
+		expect(result.observations).toHaveLength(1);
+	});
+
+	it("returns undefined usage when the stream has no assistant message with usage", async () => {
+		const loop = fakeAgentLoop(async (_prompts, context) => {
+			await context.tools[0].execute("tool-1", {
+				observations: [{ timestamp: "2026-05-02 10:30", content: "Test observation", relevance: "medium", sourceEntryIds: ["entry-a"] }],
+			});
+		});
+
+		const result = await runObserver({ ...baseArgs, agentLoop: loop });
+
+		expect(result).toHaveProperty("usage");
+		expect(result.usage).toBeUndefined();
+	});
+
+	it("returns undefined when no tool call records observations (with usage check)", async () => {
+		const loop = fakeAgentLoop(() => {});
+		const result = await runObserver({ ...baseArgs, agentLoop: loop });
+		expect(result).toBeUndefined();
 	});
 });
 

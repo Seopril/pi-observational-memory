@@ -1,5 +1,5 @@
 import { agentLoop, type AgentContext, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
-import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Message, Model, ModelThinkingLevel, Usage } from "@earendil-works/pi-ai";
 import { Type } from "@earendil-works/pi-ai";
 import type { Static } from "typebox";
 import { debugLog } from "../../debug-log.js";
@@ -135,7 +135,7 @@ export function selectDropCandidates(
 		.map((candidate) => candidate.id);
 }
 
-export async function runDropper(args: RunDropperArgs): Promise<string[] | undefined> {
+export async function runDropper(args: RunDropperArgs): Promise<{ ids: string[]; usage: Usage | undefined } | undefined> {
 	const { model, apiKey, headers, env, reflections, observations, targetTokens, signal } = args;
 	if (observations.length === 0) return undefined;
 
@@ -264,9 +264,14 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
 		signal,
 		resolveWorkerStreamSimple(model, args.modelRegistry, args.streamSimple),
 	);
+	let usage: Usage | undefined;
 	for await (const event of stream) {
 		// Tool execution collects candidate ids.
 		logAgentStreamError("dropper", event);
+		const msg = (event as { message?: { role?: string; stopReason?: string; usage?: Usage } }).message;
+		if (msg?.role === "assistant" && msg.stopReason === "stop") {
+			usage = msg.usage;
+		}
 	}
 	await stream.result();
 	const droppedIds = selectDropCandidates(proposedDropIds, observations, maxDropsAllowed, reflections);
@@ -292,5 +297,5 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
 		selectedCoverageSummaryByRelevance: summarizeCoverageByRelevanceForIds(droppedIds, observations, coverageById),
 		maxDropsAllowed,
 	});
-	return droppedIds.length > 0 ? droppedIds : undefined;
+	return droppedIds.length > 0 ? { ids: droppedIds, usage } : undefined;
 }

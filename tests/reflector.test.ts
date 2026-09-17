@@ -11,9 +11,11 @@ import { estimateStringTokens } from "../src/tokens.js";
 import { AGENT_LOOP_MAX_TOKENS } from "../src/model-budget.js";
 import { observation, reflection } from "./fixtures/session.js";
 
-function fakeAgentLoop(handler: (prompts: any[], context: any, config: any) => Promise<void> | void): any {
+function fakeAgentLoop(handler: (prompts: any[], context: any, config: any) => Promise<void> | void, events: any[] = []): any {
 	return ((prompts: any[], context: any, config: any) => ({
-		async *[Symbol.asyncIterator]() {},
+		async *[Symbol.asyncIterator]() {
+			for (const event of events) yield event;
+		},
 		result: async () => {
 			await handler(prompts, context, config);
 			return {};
@@ -219,9 +221,11 @@ describe("V3 reflector agent", () => {
 			});
 		});
 
-		const result = await runReflector({ ...baseArgs, agentLoop: loop });
+			const result = await runReflector({ ...baseArgs, agentLoop: loop });
 
-		expect(result).toEqual([{ id: hashId(content), content, supportingObservationIds: ["aaaaaaaaaaaa", "bbbbbbbbbbbb"], tokenCount: estimateStringTokens(content) }]);
+		expect(result).toHaveProperty("reflections");
+		expect(result).toHaveProperty("usage");
+		expect(result.reflections).toEqual([{ id: hashId(content), content, supportingObservationIds: ["aaaaaaaaaaaa", "bbbbbbbbbbbb"], tokenCount: estimateStringTokens(content) }]);
 	});
 
 	it("rejects invented support ids and multiline content", async () => {
@@ -252,11 +256,41 @@ describe("V3 reflector agent", () => {
 
 		const result = await runReflector({ ...baseArgs, reflections: [existing], agentLoop: loop });
 
-		expect(result?.map((item) => item.content)).toEqual(["New durable fact."]);
+		expect(result).toHaveProperty("reflections");
+		expect(result.reflections?.map((item) => item.content)).toEqual(["New durable fact."]);
 	});
 
 	it("returns undefined when no tool call records reflections", async () => {
 		const loop = fakeAgentLoop(() => {});
 		await expect(runReflector({ ...baseArgs, agentLoop: loop })).resolves.toBeUndefined();
+	});
+
+	it("returns usage from the stream result when available", async () => {
+		const usage = { input: 1200, output: 300, cacheRead: 800, cacheWrite: 100, totalTokens: 2400, cost: { total: 0.012 } };
+		const loop = fakeAgentLoop(async (_prompts, context) => {
+			await context.tools[0].execute("tool-1", {
+				reflections: [{ content: "Test reflection", supportingObservationIds: ["aaaaaaaaaaaa"] }],
+			});
+		}, [{ type: "message_end", message: { role: "assistant", stopReason: "stop", usage } }]);
+
+		const result = await runReflector({ ...baseArgs, agentLoop: loop });
+
+		expect(result).toHaveProperty("reflections");
+		expect(result).toHaveProperty("usage");
+		expect(result.usage).toEqual(usage);
+		expect(result.reflections).toHaveLength(1);
+	});
+
+	it("returns undefined usage when the stream has no assistant message with usage", async () => {
+		const loop = fakeAgentLoop(async (_prompts, context) => {
+			await context.tools[0].execute("tool-1", {
+				reflections: [{ content: "Test reflection", supportingObservationIds: ["aaaaaaaaaaaa"] }],
+			});
+		});
+
+		const result = await runReflector({ ...baseArgs, agentLoop: loop });
+
+		expect(result).toHaveProperty("usage");
+		expect(result.usage).toBeUndefined();
 	});
 });
